@@ -14,6 +14,12 @@ adds it.  In addition it reserves some extra space on the DMG for experimentatio
 cargo install --git https://github.com/getsentry/ezip2dmg --branch main ezip2dmg
 ```
 
+Note that this requires `7z` to be installed. If you don't have it:
+
+```
+brew install p7zip
+```
+
 ## Usage
 
 ```
