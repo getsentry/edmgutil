@@ -11,7 +11,7 @@ adds it.  In addition it reserves some extra space on the DMG for experimentatio
 ## Installation
 
 ```
-cargo install --git https://github.com/getsentry/ezip2dmg ezip2dmg
+cargo install --git https://github.com/getsentry/ezip2dmg --branch main ezip2dmg
 ```
 
 ## Usage
