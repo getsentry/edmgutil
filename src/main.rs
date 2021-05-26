@@ -42,6 +42,7 @@ fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> Resu
         .arg("-fs")
         .arg("HFS+")
         .arg("-encryption")
+        .arg("AES-256")
         .arg("-stdinpass")
         .arg(&path)
         .stdin(Stdio::piped())
