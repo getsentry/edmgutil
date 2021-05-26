@@ -42,5 +42,5 @@ To create an encrypted zip use 7zip:
 Just make sure to use a long password, maybe something like this:
 
 ```
-hexdump -n 32 -e '4/4 "%08x" 1 ""' /dev/urandom
+openssl rand -hex 32
 ```
