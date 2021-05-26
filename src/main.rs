@@ -3,6 +3,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{bail, Error};
@@ -26,6 +27,9 @@ struct Cli {
     /// keep the dmg?
     #[argh(switch, short = 'k', long = "keep-dmg")]
     keep_dmg: bool,
+    /// the amount of days the image is good to keep (defaults to 14 days)
+    #[argh(option, long = "days", default = "14")]
+    days: u32,
     /// the path of the input zip archive
     #[argh(positional)]
     path: PathBuf,
@@ -123,8 +127,14 @@ fn extract(src: &Path, dst: &Path, password: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn secure_volume(path: &Path) -> Result<(), Error> {
+fn secure_volume(path: &Path, days: u32) -> Result<(), Error> {
+    let good_until = (SystemTime::now() + Duration::from_secs((days as u64) * 60 * 60 * 24))
+        .duration_since(SystemTime::UNIX_EPOCH)?;
     fs::write(path.join(".metadata_never_index"), "")?;
+    fs::write(
+        path.join(".encrypted-volume-good-until"),
+        good_until.as_secs().to_string(),
+    )?;
     Command::new("mdutil")
         .arg("-E")
         .arg("-i")
@@ -155,7 +165,9 @@ fn main() -> Result<(), Error> {
     if !fs::metadata(&cli.path).map_or(false, |x| x.is_file()) {
         bail!("source archive does not exist or is not a file");
     }
-    if !check_password(&cli.path, &password)? {
+
+    let input_path = fs::canonicalize(&cli.path)?;
+    if !check_password(&input_path, &password)? {
         bail!("invalid password");
     }
 
@@ -169,7 +181,7 @@ fn main() -> Result<(), Error> {
             .unwrap_or("Data"),
     };
 
-    let size = get_uncompressed_zip_size(&cli.path)? + cli.extra_size;
+    let size = get_uncompressed_zip_size(&input_path)? + cli.extra_size;
 
     println!("[1] Creating encrypted DMG");
     let path =
@@ -178,9 +190,9 @@ fn main() -> Result<(), Error> {
     println!("[2] Mounting DMG");
     let mounted_at = mount_dmg(&path, &password)?;
     println!("[3] Securing mounted volume");
-    secure_volume(&mounted_at)?;
+    secure_volume(&mounted_at, cli.days)?;
     println!("[4] Extracting encrypted zip");
-    extract(&cli.path, &mounted_at, &password)?;
+    extract(&input_path, &mounted_at, &password)?;
     if cli.keep_dmg {
         println!("Placed encrypted DMG at: {}", path.display());
     } else {
