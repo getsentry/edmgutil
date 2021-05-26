@@ -12,3 +12,5 @@ argh = "0.1.4"
 dialoguer = "0.8.0"
 which = "4.1.0"
 uuid = { version = "0.8.2", features = ["v4"] }
+plist = "1.1.0"
+serde = { version = "1.0.126", features = ["derive"] }

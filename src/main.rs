@@ -9,8 +9,26 @@ use std::{
 use anyhow::{bail, Error};
 use argh::FromArgs;
 use dialoguer::Password;
+use serde::Deserialize;
 use uuid::Uuid;
 use which::which;
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+struct HdiUtilSystemEntity {
+    mount_point: Option<PathBuf>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+struct HdiUtilImage {
+    system_entities: Vec<HdiUtilSystemEntity>,
+}
+
+#[derive(Deserialize, Debug)]
+struct HdiUtilInfo {
+    images: Vec<HdiUtilImage>,
+}
 
 /// A utility to mount an encrypted zip into a new encrypted dmg.
 #[derive(Debug, FromArgs)]
@@ -27,12 +45,15 @@ struct Cli {
     /// keep the dmg?
     #[argh(switch, short = 'k', long = "keep-dmg")]
     keep_dmg: bool,
-    /// the amount of days the image is good to keep (defaults to 14 days)
-    #[argh(option, long = "days", default = "14")]
+    /// the amount of days the image is good to keep (defaults to 2 days)
+    #[argh(option, long = "days", default = "2")]
     days: u32,
     /// the path of the input zip archive
     #[argh(positional)]
     path: Option<PathBuf>,
+    /// unmounts all expired volumes
+    #[argh(switch, long = "unmount-expired")]
+    umount_expired: bool,
 }
 
 fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> Result<(), Error> {
@@ -147,6 +168,49 @@ fn secure_volume(path: &Path, days: u32) -> Result<(), Error> {
     Ok(())
 }
 
+fn unmount(path: &Path) -> Result<(), Error> {
+    Command::new("umount").arg(path).spawn()?.wait()?;
+    Ok(())
+}
+
+fn unmount_expired() -> Result<(), Error> {
+    let output = Command::new("hdiutil")
+        .arg("info")
+        .arg("-plist")
+        .stdout(Stdio::piped())
+        .spawn()?
+        .wait_with_output()?;
+    let info: HdiUtilInfo = plist::from_bytes(&output.stdout)?;
+    let mut encrypted_volumes = vec![];
+
+    for image in &info.images {
+        for entity in &image.system_entities {
+            if let Some(ref mount_point) = entity.mount_point {
+                if let Some(ts) =
+                    fs::read_to_string(mount_point.join(".encrypted-volume-good-until"))
+                        .ok()
+                        .and_then(|x| x.parse().ok())
+                        .map(|x| SystemTime::UNIX_EPOCH + Duration::from_secs(x))
+                {
+                    encrypted_volumes.push((mount_point, ts));
+                }
+            }
+        }
+    }
+
+    let now = SystemTime::now();
+    for (mount_point, expires) in encrypted_volumes {
+        if expires < now {
+            println!("Unmounting expired volume {}", mount_point.display());
+            unmount(mount_point)?;
+        } else {
+            println!("Keeping non expired volume {}", mount_point.display());
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Error> {
     let mut cli: Cli = argh::from_env();
 
@@ -155,6 +219,10 @@ fn main() -> Result<(), Error> {
     }
     if !which("hdiutil").is_ok() {
         bail!("hdiutil is not available");
+    }
+
+    if cli.umount_expired {
+        return unmount_expired();
     }
 
     let password = match cli.password.take() {

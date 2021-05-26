@@ -31,6 +31,10 @@ extract the zip file into it and then delete the created dmg (unless `-k` is pas
 
 Once the DMG is unmounted everything is gone again.
 
+When the DMG is created a timestamp is frozen into it (defined by `--days`, defaults to 2).  It's
+recommended to run `ezip2dmg --unmount-expired` regularly to automatically unmount expired
+images.
+
 ## Creating Encrypted Zips
 
 To create an encrypted zip use 7zip:
