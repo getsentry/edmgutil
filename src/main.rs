@@ -32,7 +32,7 @@ struct Cli {
     days: u32,
     /// the path of the input zip archive
     #[argh(positional)]
-    path: PathBuf,
+    path: Option<PathBuf>,
 }
 
 fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> Result<(), Error> {
@@ -162,20 +162,21 @@ fn main() -> Result<(), Error> {
         None => Password::new().with_prompt("password").interact()?,
     };
 
-    if !fs::metadata(&cli.path).map_or(false, |x| x.is_file()) {
-        bail!("source archive does not exist or is not a file");
-    }
+    let input_path = match cli.path {
+        Some(ref path) => fs::canonicalize(path)?,
+        None => bail!("source archive path is required"),
+    };
 
-    let input_path = fs::canonicalize(&cli.path)?;
+    if !fs::metadata(&input_path).map_or(false, |x| x.is_file()) {
+        bail!("source archive is not a file");
+    }
     if !check_password(&input_path, &password)? {
         bail!("invalid password");
     }
 
     let volume_name = match cli.volume_name {
         Some(ref name) => name.as_str(),
-        None => cli
-            .path
-            .as_path()
+        None => input_path
             .file_stem()
             .and_then(|x| x.to_str())
             .unwrap_or("Data"),
