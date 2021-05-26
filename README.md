@@ -30,3 +30,17 @@ It will prompt for the password, then create an encrypted volumne with the same 
 extract the zip file into it and then delete the created dmg (unless `-k` is passed).
 
 Once the DMG is unmounted everything is gone again.
+
+## Creating Encrypted Zips
+
+To create an encrypted zip use 7zip:
+
+```
+7za a -tzip -p'the password' -mem=AES256 encrypted.zip folder
+```
+
+Just make sure to use a long password, maybe something like this:
+
+```
+hexdump -n 32 -e '4/4 "%08x" 1 ""' /dev/urandom
+```
