@@ -45,8 +45,8 @@ struct Cli {
     /// keep the dmg?
     #[argh(switch, short = 'k', long = "keep-dmg")]
     keep_dmg: bool,
-    /// the amount of days the image is good to keep (defaults to 2 days)
-    #[argh(option, long = "days", default = "2")]
+    /// the amount of days the image is good to keep (defaults to 7 days)
+    #[argh(option, long = "days", default = "7")]
     days: u32,
     /// the path of the input zip archive
     #[argh(positional)]
