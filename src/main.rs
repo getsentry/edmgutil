@@ -1,251 +1,41 @@
 use std::{
+    fmt::Write,
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    time::{Duration, SystemTime},
+    process::Command,
+    time::SystemTime,
 };
 
 use anyhow::{bail, Error};
-use argh::FromArgs;
 use dialoguer::Password;
-use serde::Deserialize;
+use structopt::StructOpt;
 use uuid::Uuid;
 use which::which;
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "kebab-case")]
-struct HdiUtilSystemEntity {
-    mount_point: Option<PathBuf>,
+use crate::cli::{
+    Commands, CronCommand, EjectCommand, ImageOptions, ImportCommand, ListCommand, NewCommand,
+};
+
+mod cli;
+mod dmg;
+mod zip;
+
+#[derive(Debug)]
+struct PrepareResult {
+    password: String,
+    dmg_path: PathBuf,
+    mounted_at: PathBuf,
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "kebab-case")]
-struct HdiUtilImage {
-    system_entities: Vec<HdiUtilSystemEntity>,
-}
-
-#[derive(Deserialize, Debug)]
-struct HdiUtilInfo {
-    images: Vec<HdiUtilImage>,
-}
-
-/// A utility to mount an encrypted zip into a new encrypted dmg.
-#[derive(Debug, FromArgs)]
-struct Cli {
-    /// provide a password instead of prompting
-    #[argh(option, short = 'p', long = "password")]
-    password: Option<String>,
-    /// the size for the encrypted DMG in megabytes
-    #[argh(option, short = 's', long = "size")]
-    size: Option<usize>,
-    /// the extra size for the encrypted DMG in megabytes
-    #[argh(option, long = "extra-size", default = "100")]
-    extra_size: usize,
-    /// the volume name of the dmg
-    #[argh(option, short = 'n', long = "name")]
-    volume_name: Option<String>,
-    /// keep the dmg?
-    #[argh(switch, short = 'k', long = "keep-dmg")]
-    keep_dmg: bool,
-    /// the amount of days the image is good to keep (defaults to 7 days)
-    #[argh(option, long = "days", default = "7")]
-    days: u32,
-    /// the path of the input zip archive
-    #[argh(positional)]
-    path: Option<PathBuf>,
-    /// unmounts all expired volumes
-    #[argh(switch, long = "unmount-expired")]
-    umount_expired: bool,
-    /// unmounts all volumes
-    #[argh(switch, long = "unmount-all")]
-    umount_all: bool,
-    /// creates an empty volume instead of from a zip
-    #[argh(switch, long = "empty")]
-    empty: bool,
-}
-
-fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> Result<(), Error> {
-    let mut child = Command::new("hdiutil")
-        .arg("create")
-        .arg("-megabytes")
-        .arg(size.to_string())
-        .arg("-ov")
-        .arg("-volname")
-        .arg(volume_name)
-        .arg("-fs")
-        .arg("HFS+")
-        .arg("-encryption")
-        .arg("AES-256")
-        .arg("-stdinpass")
-        .arg(&path)
-        .stdin(Stdio::piped())
-        .spawn()?;
-    let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(password.as_bytes())?;
-    drop(stdin);
-    child.wait()?;
-    Ok(())
-}
-
-fn mount_dmg(path: &Path, password: &str) -> Result<PathBuf, Error> {
-    let mut child = Command::new("hdiutil")
-        .arg("attach")
-        .arg("-stdinpass")
-        .arg(path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(password.as_bytes())?;
-    drop(stdin);
-    let output = child.wait_with_output()?;
-    let to_parse = std::str::from_utf8(&output.stdout)?;
-    for line in to_parse.lines() {
-        if !line.contains("\tApple_HFS") {
-            continue;
-        }
-        return Ok(PathBuf::from(
-            line.trim_end_matches(&['\n'][..])
-                .splitn(3, '\t')
-                .nth(2)
-                .unwrap(),
-        ));
-    }
-
-    bail!("failed to mount dmg");
-}
-
-fn get_uncompressed_zip_size(path: &Path) -> Result<usize, Error> {
-    let child = Command::new("7z")
-        .arg("l")
-        .arg(path)
-        .stdout(Stdio::piped())
-        .spawn()?
-        .wait_with_output()?;
-    let output = std::str::from_utf8(&child.stdout)?;
-    let last_line = output.trim().lines().last().unwrap();
-    let bytes: u64 = last_line.split_ascii_whitespace().nth(2).unwrap().parse()?;
-    Ok((bytes / 1024) as usize + 1)
-}
-
-fn check_password(path: &Path, password: &str) -> Result<bool, Error> {
-    let child = Command::new("7z")
-        .arg("t")
-        .arg(&format!("-p{}", password))
-        .arg(path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?
-        .wait_with_output()?;
-    let output = std::str::from_utf8(&child.stdout)?;
-    let err = std::str::from_utf8(&child.stderr)?;
-    Ok(!err.contains("ERROR: Wrong password") && output.contains("Everything is Ok"))
-}
-
-fn extract(src: &Path, dst: &Path, password: &str) -> Result<(), Error> {
-    Command::new("7z")
-        .arg("x")
-        .arg("-bsp2")
-        .arg(&format!("-p{}", password))
-        .arg("-y")
-        .arg(src)
-        .current_dir(dst)
-        .stdout(Stdio::null())
-        .spawn()?
-        .wait()?;
-    Ok(())
-}
-
-fn secure_volume(path: &Path, days: u32) -> Result<(), Error> {
-    let good_until = (SystemTime::now() + Duration::from_secs((days as u64) * 60 * 60 * 24))
-        .duration_since(SystemTime::UNIX_EPOCH)?;
-    fs::write(path.join(".metadata_never_index"), "")?;
-    fs::write(
-        path.join(".encrypted-volume-good-until"),
-        good_until.as_secs().to_string(),
-    )?;
-    Command::new("mdutil")
-        .arg("-E")
-        .arg("-i")
-        .arg("off")
-        .arg(path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?
-        .wait()?;
-    Ok(())
-}
-
-fn unmount(path: &Path) -> Result<(), Error> {
-    Command::new("umount").arg(path).spawn()?.wait()?;
-    Ok(())
-}
-
-fn unmount_volumes(check_expiry: bool) -> Result<(), Error> {
-    let output = Command::new("hdiutil")
-        .arg("info")
-        .arg("-plist")
-        .stdout(Stdio::piped())
-        .spawn()?
-        .wait_with_output()?;
-    let info: HdiUtilInfo = plist::from_bytes(&output.stdout)?;
-    let mut encrypted_volumes = vec![];
-
-    for image in &info.images {
-        for entity in &image.system_entities {
-            if let Some(ref mount_point) = entity.mount_point {
-                if let Some(ts) =
-                    fs::read_to_string(mount_point.join(".encrypted-volume-good-until"))
-                        .ok()
-                        .and_then(|x| x.parse().ok())
-                        .map(|x| SystemTime::UNIX_EPOCH + Duration::from_secs(x))
-                {
-                    encrypted_volumes.push((mount_point, ts));
-                }
-            }
-        }
-    }
-
-    let now = SystemTime::now();
-    for (mount_point, expires) in encrypted_volumes {
-        let expired = expires < now;
-        if expired || !check_expiry {
-            println!(
-                "Unmounting {}volume {}",
-                if expired { "expired " } else { "" },
-                mount_point.display()
-            );
-            unmount(mount_point)?;
-        } else {
-            println!("Keeping non expired volume {}", mount_point.display());
-        }
-    }
-
-    Ok(())
-}
-
-fn main() -> Result<(), Error> {
-    let mut cli: Cli = argh::from_env();
-
-    if !which("7z").is_ok() {
-        bail!("7z is not available");
-    }
-    if !which("hdiutil").is_ok() {
-        bail!("hdiutil is not available");
-    }
-
-    if cli.umount_all {
-        return unmount_volumes(false);
-    }
-    if cli.umount_expired {
-        return unmount_volumes(true);
-    }
-
-    let password = match cli.password.take() {
-        Some(password) => password,
+fn prepare_dmg(
+    opts: &ImageOptions,
+    size: usize,
+    source_path: Option<&Path>,
+) -> Result<PrepareResult, Error> {
+    let password = match opts.password {
+        Some(ref password) => password.clone(),
         None => {
-            if !cli.keep_dmg && cli.empty {
+            if !opts.keep_dmg && source_path.is_none() {
                 Uuid::new_v4().to_simple().to_string()
             } else {
                 Password::new().with_prompt("password").interact()?
@@ -253,63 +43,168 @@ fn main() -> Result<(), Error> {
         }
     };
 
-    let volume_name = match cli.volume_name {
+    let volume_name = match opts.volume_name {
         Some(ref name) => name.as_str(),
-        None => cli
-            .path
-            .as_ref()
+        None => source_path
             .and_then(|x| x.file_stem().and_then(|x| x.to_str()))
             .unwrap_or("EncryptedScratchpad"),
     };
-    let path =
+    let dmg_path =
         std::env::temp_dir().join(format!("encrypted-{}-{}.dmg", Uuid::new_v4(), volume_name));
 
-    let input_path = if cli.empty {
-        None
+    println!("[1] Creating encrypted DMG");
+    dmg::make_dmg(&dmg_path, volume_name, size, &password)?;
+    println!("[2] Mounting DMG");
+    let mounted_at = dmg::mount_dmg(&dmg_path, &password)?;
+    println!("[3] Securing mounted volume");
+    dmg::secure_volume(&mounted_at, opts.days)?;
+
+    Ok(PrepareResult {
+        password,
+        dmg_path,
+        mounted_at,
+    })
+}
+
+fn finalize_dmg(opts: &ImageOptions, result: &PrepareResult) -> Result<(), Error> {
+    if opts.keep_dmg {
+        println!("Placed encrypted DMG at: {}", result.dmg_path.display());
     } else {
-        let input_path = match cli.path {
-            Some(ref path) => fs::canonicalize(path)?,
-            None => bail!("source archive path is required"),
-        };
+        fs::remove_file(&result.dmg_path)?;
+    }
+    println!("Mounted encrypted DMG at: {}", result.mounted_at.display());
+    println!("Ummount with: umount \"{}\"", result.mounted_at.display());
+    Ok(())
+}
 
-        if !fs::metadata(&input_path).map_or(false, |x| x.is_file()) {
-            bail!("source archive is not a file");
-        }
-        if !check_password(&input_path, &password)? {
-            bail!("invalid password");
-        }
+fn new_command(args: NewCommand) -> Result<(), Error> {
+    let result = prepare_dmg(&args.image_opts, args.size, None)?;
+    finalize_dmg(&args.image_opts, &result)?;
+    Ok(())
+}
 
-        Some(input_path)
+fn import_command(args: ImportCommand) -> Result<(), Error> {
+    let input_path = fs::canonicalize(&args.path)?;
+
+    if !fs::metadata(&input_path).map_or(false, |x| x.is_file()) {
+        bail!("source archive is not a file");
+    }
+    let size = zip::get_uncompressed_zip_size(&input_path)? + args.extra_size;
+    let result = prepare_dmg(&args.image_opts, size, Some(&input_path))?;
+    if !zip::check_password(&input_path, &result.password)? {
+        bail!("invalid password");
+    }
+    println!("[4] Extracting encrypted zip");
+    zip::extract(&input_path, &result.mounted_at, &result.password)?;
+    finalize_dmg(&args.image_opts, &result)?;
+    Ok(())
+}
+
+fn list_command(args: ListCommand) -> Result<(), Error> {
+    let encrypted_volumes = dmg::list_volumes()?;
+    for (mount_point, expires) in encrypted_volumes {
+        println!("{}", mount_point.display());
+        if args.verbose {
+            println!(
+                "  expires: {}",
+                chrono::DateTime::<chrono::Utc>::from(expires)
+            );
+        }
+    }
+    Ok(())
+}
+
+fn eject_command(args: EjectCommand) -> Result<(), Error> {
+    let encrypted_volumes = dmg::list_volumes()?;
+    let reference_path = args.path.as_ref().and_then(|x| fs::canonicalize(x).ok());
+    let mut image_found = false;
+
+    let now = SystemTime::now();
+    for (mount_point, expires) in encrypted_volumes {
+        let expired = expires < now;
+        let is_match =
+            reference_path.is_some() && fs::canonicalize(&mount_point).ok() == reference_path;
+        if (args.expired && expired) || args.all || is_match {
+            println!(
+                "Ejecting {}volume {}",
+                if expired { "expired " } else { "" },
+                mount_point.display()
+            );
+            dmg::eject(&mount_point)?;
+        }
+        if is_match {
+            image_found = true;
+        }
+    }
+
+    if !image_found && args.path.is_some() {
+        bail!("volume was not mounted");
+    }
+
+    Ok(())
+}
+
+fn cron_command(args: CronCommand) -> Result<(), Error> {
+    Command::new("crontab")
+        .arg("-e")
+        .env(
+            "CRONTAB_MODE",
+            if args.install { "install" } else { "uninstall" },
+        )
+        .env("EDITOR", std::env::current_exe()?)
+        .spawn()?
+        .wait()?;
+    Ok(())
+}
+
+fn do_cronedit() -> Result<bool, Error> {
+    let mut cron = String::new();
+    let add = match std::env::var("CRONTAB_MODE").as_deref() {
+        Ok("install") => true,
+        Ok("uninstall") => false,
+        _ => return Ok(false),
     };
 
-    let size = match cli.size {
-        Some(size) => size,
-        None => {
-            if let Some(ref input_path) = input_path {
-                get_uncompressed_zip_size(&input_path)? + cli.extra_size
-            } else {
-                bail!("size is necessary for empty volumes");
+    let path = std::env::args_os().nth(1).unwrap();
+    let executable = std::env::current_exe()?;
+    let cron_cmd = format!("{} eject --expired", executable.display());
+    let mut found = false;
+
+    for line in fs::read_to_string(&path)?.lines() {
+        if line.trim().ends_with(&cron_cmd) {
+            found = true;
+            if !add {
+                continue;
             }
         }
+        writeln!(cron, "{}", line)?;
+    }
+
+    if add && !found {
+        write!(cron, "0 * * * * {}\n", cron_cmd)?;
+    }
+
+    fs::write(&path, cron)?;
+
+    Ok(true)
+}
+
+fn main() -> Result<(), Error> {
+    if do_cronedit()? {
+        return Ok(());
+    }
+
+    let commands = Commands::from_args();
+
+    if !which("7z").is_ok() {
+        bail!("7z is not available");
+    }
+
+    return match commands {
+        Commands::New(args) => new_command(args),
+        Commands::Import(args) => import_command(args),
+        Commands::List(args) => list_command(args),
+        Commands::Eject(args) => eject_command(args),
+        Commands::Cron(args) => cron_command(args),
     };
-
-    println!("[1] Creating encrypted DMG");
-    make_dmg(&path, volume_name, size, &password)?;
-    println!("[2] Mounting DMG");
-    let mounted_at = mount_dmg(&path, &password)?;
-    println!("[3] Securing mounted volume");
-    secure_volume(&mounted_at, cli.days)?;
-    if let Some(input_path) = input_path {
-        println!("[4] Extracting encrypted zip");
-        extract(&input_path, &mounted_at, &password)?;
-    }
-
-    if cli.keep_dmg {
-        println!("Placed encrypted DMG at: {}", path.display());
-    } else {
-        fs::remove_file(&path)?;
-    }
-    println!("Mounted encrypted DMG at: {}", mounted_at.display());
-    println!("Ummount with: umount \"{}\"", mounted_at.display());
-    Ok(())
 }

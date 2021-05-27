@@ -1,5 +1,5 @@
 [package]
-name = "ezip2dmg"
+name = "edmgutil"
 version = "0.1.0"
 authors = ["Armin Ronacher <armin.ronacher@active-4.com>"]
 edition = "2018"
@@ -8,9 +8,11 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.40"
-argh = "0.1.4"
-dialoguer = "0.8.0"
+dialoguer = { version = "0.8.0", default-features = false }
 which = "4.1.0"
 uuid = { version = "0.8.2", features = ["v4"] }
 plist = "1.1.0"
 serde = { version = "1.0.126", features = ["derive"] }
+structopt = { version = "0.3.21", default-features = false }
+clap = { version = "2.33.3", default-features = false }
+chrono = { version = "0.4.19", default-features = false, features = ["std"] }

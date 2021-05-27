@@ -1,17 +1,19 @@
-# ezip2dmg
+# edmgutil
 
-Simple wrapper utility to decompress an encrypted ZIP into a newly mounted encrypted DMG.  This
-makes transferring data that should only live for a short period of time for debugging purposes
-to developer machines a more convenient endeavour.  The volume is individually encrypted and
-when unmounted is lost.
+`edmgutil` is a simple wrapper utility to hdiutil to help you work with disposable, encrypted
+DMGs. It can decompress an encrypted ZIP into a newly mounted encrypted DMG, create empty
+throwaway DMGs and automatically eject expired ones. This makes transferring and working with
+data that should only live for a short period of time for debugging purposes to developer
+machines a more convenient endeavour. The volume is individually encrypted and gets destroyed
+when ejected.
 
 It also instructs the backup tool to disable backing up the volume in case someone accidentally
-adds it.  In addition it reserves some extra space on the DMG for experimentation.
+adds it.
 
 ## Installation
 
 ```
-cargo install --git https://github.com/getsentry/ezip2dmg --branch main ezip2dmg
+cargo install --git https://github.com/getsentry/edmgutil --branch main edmgutil
 ```
 
 Note that this requires `7z` to be installed. If you don't have it:
@@ -20,26 +22,20 @@ Note that this requires `7z` to be installed. If you don't have it:
 brew install p7zip
 ```
 
-## Usage
+## Importing Encrypted Zip Archives
 
 ```
-ezip2dmg /path/to/encrypted.zip
+edmgutil import /path/to/encrypted.zip
 ```
 
 It will prompt for the password, then create an encrypted volumne with the same password and then
 extract the zip file into it and then delete the created dmg (unless `-k` is passed).
 
-Once the DMG is unmounted everything is gone again.
+Once the DMG is ejected everything is gone again.
 
-When the DMG is created a timestamp is frozen into it (defined by `--days`, defaults to 7).  It's
-recommended to run `ezip2dmg --unmount-expired` regularly to automatically unmount expired
-images for instance by putting it into your crontab:
-
-```
-0 * * * * ezip2dmg --unmount-expired
-```
-
-## Creating Encrypted Zips
+When the DMG is created a timestamp is frozen into it (defined by `--days`, defaults to 7). It's
+recommended to run `edmgutil eject --expired` regularly to automatically unmount expired
+images for instance by putting it into your crontab (see `edmgutil cron`).
 
 To create an encrypted zip use 7zip:
 
@@ -51,4 +47,33 @@ Just make sure to use a long password, maybe something like this:
 
 ```
 openssl rand -hex 32
+```
+
+## Creating Empty DMGs
+
+To create an empty, encrypted DMG use the `new` command and provide the size of the DMG in
+megabytes. Alternatively you can provide a descriptive name which will become the volume name:
+
+```
+edmgutil new --size 100 --name "My Stuff"
+```
+
+## Listing / Ejecting
+
+To list and eject encrypted DMGs you can use the following commands:
+
+```
+edmgutil list
+edmgutil eject --expired
+edmgutil eject --all
+edmgutil eject /Volumes/EncryptedVolume
+```
+
+## Crontab
+
+To ensure that expired images are ejected automatically when possible can can install a crontab
+which runs ejecting hourly:
+
+```
+edmgutil cron --install
 ```
