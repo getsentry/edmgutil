@@ -36,8 +36,11 @@ struct Cli {
     /// provide a password instead of prompting
     #[argh(option, short = 'p', long = "password")]
     password: Option<String>,
+    /// the size for the encrypted DMG in megabytes
+    #[argh(option, short = 's', long = "size")]
+    size: Option<usize>,
     /// the extra size for the encrypted DMG in megabytes
-    #[argh(option, short = 's', long = "extra-size", default = "100")]
+    #[argh(option, long = "extra-size", default = "100")]
     extra_size: usize,
     /// the volume name of the dmg
     #[argh(option, short = 'n', long = "name")]
@@ -54,6 +57,12 @@ struct Cli {
     /// unmounts all expired volumes
     #[argh(switch, long = "unmount-expired")]
     umount_expired: bool,
+    /// unmounts all volumes
+    #[argh(switch, long = "unmount-all")]
+    umount_all: bool,
+    /// creates an empty volume instead of from a zip
+    #[argh(switch, long = "empty")]
+    empty: bool,
 }
 
 fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> Result<(), Error> {
@@ -173,7 +182,7 @@ fn unmount(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn unmount_expired() -> Result<(), Error> {
+fn unmount_volumes(check_expiry: bool) -> Result<(), Error> {
     let output = Command::new("hdiutil")
         .arg("info")
         .arg("-plist")
@@ -200,8 +209,13 @@ fn unmount_expired() -> Result<(), Error> {
 
     let now = SystemTime::now();
     for (mount_point, expires) in encrypted_volumes {
-        if expires < now {
-            println!("Unmounting expired volume {}", mount_point.display());
+        let expired = expires < now;
+        if expired || !check_expiry {
+            println!(
+                "Unmounting {}volume {}",
+                if expired { "expired " } else { "" },
+                mount_point.display()
+            );
             unmount(mount_point)?;
         } else {
             println!("Keeping non expired volume {}", mount_point.display());
@@ -221,47 +235,75 @@ fn main() -> Result<(), Error> {
         bail!("hdiutil is not available");
     }
 
+    if cli.umount_all {
+        return unmount_volumes(false);
+    }
     if cli.umount_expired {
-        return unmount_expired();
+        return unmount_volumes(true);
     }
 
     let password = match cli.password.take() {
         Some(password) => password,
-        None => Password::new().with_prompt("password").interact()?,
+        None => {
+            if !cli.keep_dmg && cli.empty {
+                Uuid::new_v4().to_simple().to_string()
+            } else {
+                Password::new().with_prompt("password").interact()?
+            }
+        }
     };
-
-    let input_path = match cli.path {
-        Some(ref path) => fs::canonicalize(path)?,
-        None => bail!("source archive path is required"),
-    };
-
-    if !fs::metadata(&input_path).map_or(false, |x| x.is_file()) {
-        bail!("source archive is not a file");
-    }
-    if !check_password(&input_path, &password)? {
-        bail!("invalid password");
-    }
 
     let volume_name = match cli.volume_name {
         Some(ref name) => name.as_str(),
-        None => input_path
-            .file_stem()
-            .and_then(|x| x.to_str())
-            .unwrap_or("Data"),
+        None => cli
+            .path
+            .as_ref()
+            .and_then(|x| x.file_stem().and_then(|x| x.to_str()))
+            .unwrap_or("EncryptedScratchpad"),
     };
-
-    let size = get_uncompressed_zip_size(&input_path)? + cli.extra_size;
-
-    println!("[1] Creating encrypted DMG");
     let path =
         std::env::temp_dir().join(format!("encrypted-{}-{}.dmg", Uuid::new_v4(), volume_name));
+
+    let input_path = if cli.empty {
+        None
+    } else {
+        let input_path = match cli.path {
+            Some(ref path) => fs::canonicalize(path)?,
+            None => bail!("source archive path is required"),
+        };
+
+        if !fs::metadata(&input_path).map_or(false, |x| x.is_file()) {
+            bail!("source archive is not a file");
+        }
+        if !check_password(&input_path, &password)? {
+            bail!("invalid password");
+        }
+
+        Some(input_path)
+    };
+
+    let size = match cli.size {
+        Some(size) => size,
+        None => {
+            if let Some(ref input_path) = input_path {
+                get_uncompressed_zip_size(&input_path)? + cli.extra_size
+            } else {
+                bail!("size is necessary for empty volumes");
+            }
+        }
+    };
+
+    println!("[1] Creating encrypted DMG");
     make_dmg(&path, volume_name, size, &password)?;
     println!("[2] Mounting DMG");
     let mounted_at = mount_dmg(&path, &password)?;
     println!("[3] Securing mounted volume");
     secure_volume(&mounted_at, cli.days)?;
-    println!("[4] Extracting encrypted zip");
-    extract(&input_path, &mounted_at, &password)?;
+    if let Some(input_path) = input_path {
+        println!("[4] Extracting encrypted zip");
+        extract(&input_path, &mounted_at, &password)?;
+    }
+
     if cli.keep_dmg {
         println!("Placed encrypted DMG at: {}", path.display());
     } else {
