@@ -181,7 +181,7 @@ fn do_cronedit() -> Result<bool, Error> {
     }
 
     if add && !found {
-        write!(cron, "0 * * * * {}\n", cron_cmd)?;
+        writeln!(cron, "0 * * * * {}", cron_cmd)?;
     }
 
     fs::write(&path, cron)?;
@@ -196,15 +196,15 @@ fn main() -> Result<(), Error> {
 
     let commands = Commands::from_args();
 
-    if !which("7z").is_ok() {
+    if which("7z").is_err() {
         bail!("7z is not available");
     }
 
-    return match commands {
+    match commands {
         Commands::New(args) => new_command(args),
         Commands::Import(args) => import_command(args),
         Commands::List(args) => list_command(args),
         Commands::Eject(args) => eject_command(args),
         Commands::Cron(args) => cron_command(args),
-    };
+    }
 }
