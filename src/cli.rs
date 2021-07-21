@@ -15,6 +15,7 @@ pub enum Commands {
     List(ListCommand),
     Eject(EjectCommand),
     Cron(CronCommand),
+    FindDownloads(FindDownloadsCommand),
 }
 
 #[derive(Debug, StructOpt)]
@@ -93,4 +94,21 @@ pub struct CronCommand {
     /// uninstalls the cron
     #[structopt(long = "uninstall")]
     pub uninstall: bool,
+}
+
+/// helps monitoring the download folder for problematic sources
+///
+/// This command lets you quickly show all the files in your downloads folder
+/// which come from a specific source.  This way you can easily periodically
+/// check that it does not contain files you don't expect it to be there.
+#[derive(Debug, StructOpt)]
+pub struct FindDownloadsCommand {
+    /// the domains to look out for
+    #[structopt(long = "domain", short = "d")]
+    pub domains: Vec<String>,
+    /// provide additional information when listing files
+    #[structopt(long = "verbose", short = "v")]
+    pub verbose: bool,
+    /// an alternative folder than the default download folder to search
+    pub path: Option<PathBuf>,
 }

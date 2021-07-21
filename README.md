@@ -77,3 +77,22 @@ which runs ejecting hourly:
 ```
 edmgutil cron --install
 ```
+
+## Download Folder Monitoring
+
+Because browsers love to download files unprompted into the default download location it's not
+uncommon for you to accidentally places files there you really don't want to retain there.
+The `find-downloads` command can be useful for manual spot checking.
+
+This will list all files that were downloaded from `your-domain.tld`:
+
+```
+edmgutil find-downloads -d your-domain.tld
+```
+
+For additional information you can turn on verbose mode which shows the exact source of the
+file by URL:
+
+```
+edmgutil find-downloads -d your-domain.tld -v
+```
