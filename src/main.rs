@@ -10,17 +10,20 @@ use anyhow::{anyhow, bail, Error};
 use chrono::{DateTime, Utc};
 use dialoguer::Password;
 use structopt::StructOpt;
-use url::Url;
 use uuid::Uuid;
 use which::which;
 
-use crate::cli::{
-    Commands, CronCommand, EjectCommand, FindDownloadsCommand, ImageOptions, ImportCommand,
-    ListCommand, NewCommand,
+use crate::{
+    cli::{
+        Commands, CronCommand, EjectCommand, FindDownloadsCommand, ImageOptions, ImportCommand,
+        ListCommand, NewCommand,
+    },
+    downloads::find_downloads_in_folder,
 };
 
 mod cli;
 mod dmg;
+mod downloads;
 mod zip;
 
 #[derive(Debug)]
@@ -170,38 +173,10 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
             .ok_or_else(|| anyhow!("could not find download dir"))?,
     };
 
-    let mut matches = vec![];
-
-    for entry in fs::read_dir(&download_dir)? {
-        let entry = entry?;
-        let attr = xattr::get(entry.path(), "com.apple.metadata:kMDItemWhereFroms");
-        if let Ok(Some(encoded_plist)) = attr {
-            let might_be_urls: Vec<String> = plist::from_bytes(&encoded_plist)?;
-            let parsed_urls = might_be_urls
-                .into_iter()
-                .filter_map(|x| Url::parse(&x).ok())
-                .collect::<Vec<_>>();
-            if let Some(source) = parsed_urls
-                .into_iter()
-                .filter_map(|url| {
-                    if args.domains.is_empty() {
-                        return Some(url);
-                    }
-                    for domain in &args.domains {
-                        if url.domain() == Some(domain) {
-                            return Some(url);
-                        }
-                    }
-                    None
-                })
-                .next()
-            {
-                matches.push((entry.path().to_owned(), source));
-            }
-        }
-    }
-
-    matches.sort_by_cached_key(|x| x.0.file_name().map(|x| x.to_owned()));
+    let domains = &args.domains;
+    let matches = find_downloads_in_folder(download_dir, move |url| {
+        domains.is_empty() || domains.iter().any(|x| Some(x.as_str()) == url.domain())
+    })?;
 
     for (path, source) in matches {
         println!("{}", path.display());
