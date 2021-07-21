@@ -16,3 +16,6 @@ serde = { version = "1.0.126", features = ["derive"] }
 structopt = { version = "0.3.21", default-features = false }
 clap = { version = "2.33.3", default-features = false }
 chrono = { version = "0.4.19", default-features = false, features = ["std"] }
+xattr = "0.2.2"
+directories = "3.0.2"
+url = { version = "2.2.2", features = ["serde"] }

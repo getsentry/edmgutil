@@ -6,14 +6,17 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{bail, Error};
+use anyhow::{anyhow, bail, Error};
+use chrono::{DateTime, Utc};
 use dialoguer::Password;
 use structopt::StructOpt;
+use url::Url;
 use uuid::Uuid;
 use which::which;
 
 use crate::cli::{
-    Commands, CronCommand, EjectCommand, ImageOptions, ImportCommand, ListCommand, NewCommand,
+    Commands, CronCommand, EjectCommand, FindDownloadsCommand, ImageOptions, ImportCommand,
+    ListCommand, NewCommand,
 };
 
 mod cli;
@@ -157,6 +160,62 @@ fn cron_command(args: CronCommand) -> Result<(), Error> {
     Ok(())
 }
 
+fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
+    let dirs = directories::UserDirs::new();
+    let download_dir = dirs
+        .as_ref()
+        .and_then(|x| x.download_dir())
+        .ok_or_else(|| anyhow!("could not find download dir"))?;
+
+    let mut matches = vec![];
+
+    for entry in fs::read_dir(&download_dir)? {
+        let entry = entry?;
+        let attr = xattr::get(entry.path(), "com.apple.metadata:kMDItemWhereFroms");
+        if let Ok(Some(encoded_plist)) = attr {
+            let might_be_urls: Vec<String> = plist::from_bytes(&encoded_plist)?;
+            let parsed_urls = might_be_urls
+                .into_iter()
+                .filter_map(|x| Url::parse(&x).ok())
+                .collect::<Vec<_>>();
+            if let Some(source) = parsed_urls
+                .into_iter()
+                .filter_map(|url| {
+                    if args.domains.is_empty() {
+                        return Some(url);
+                    }
+                    for domain in &args.domains {
+                        if url.domain() == Some(domain) {
+                            return Some(url);
+                        }
+                    }
+                    None
+                })
+                .next()
+            {
+                matches.push((entry.path().to_owned(), source));
+            }
+        }
+    }
+
+    matches.sort_by_cached_key(|x| x.0.file_name().map(|x| x.to_owned()));
+
+    for (path, source) in matches {
+        println!("{}", path.display());
+        if args.verbose {
+            println!("  source: {}", source);
+            let created = fs::metadata(&path)
+                .and_then(|x| x.created())
+                .map(|x| DateTime::<Utc>::from(x));
+            if let Ok(created) = created {
+                println!("  created: {}", created);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn do_cronedit() -> Result<bool, Error> {
     let mut cron = String::new();
     let add = match std::env::var("CRONTAB_MODE").as_deref() {
@@ -206,5 +265,6 @@ fn main() -> Result<(), Error> {
         Commands::List(args) => list_command(args),
         Commands::Eject(args) => eject_command(args),
         Commands::Cron(args) => cron_command(args),
+        Commands::FindDownloads(args) => find_downloads_command(args),
     }
 }
