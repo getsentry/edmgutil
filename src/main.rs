@@ -162,10 +162,13 @@ fn cron_command(args: CronCommand) -> Result<(), Error> {
 
 fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
     let dirs = directories::UserDirs::new();
-    let download_dir = dirs
-        .as_ref()
-        .and_then(|x| x.download_dir())
-        .ok_or_else(|| anyhow!("could not find download dir"))?;
+    let download_dir = match args.path {
+        Some(ref path) => path.as_path(),
+        None => dirs
+            .as_ref()
+            .and_then(|x| x.download_dir())
+            .ok_or_else(|| anyhow!("could not find download dir"))?,
+    };
 
     let mut matches = vec![];
 
