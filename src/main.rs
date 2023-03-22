@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, bail, Error};
@@ -184,7 +184,17 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
     };
 
     let domains = &args.domains;
-    let matches = find_downloads_in_folder(download_dir, move |url| {
+    let date_threshold = args
+        .days
+        .map(|days| SystemTime::now() - Duration::from_secs(60 * 60 * 24 * days as u64));
+    let matches = find_downloads_in_folder(download_dir, move |url, path| {
+        if let Some(threshold) = date_threshold {
+            if let Some(date) = fs::metadata(path).ok().and_then(|x| x.created().ok()) {
+                if date >= threshold {
+                    return false;
+                }
+            }
+        }
         domains.is_empty()
             || domains.iter().any(|x| {
                 url.domain()

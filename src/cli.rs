@@ -117,4 +117,7 @@ pub struct FindDownloadsCommand {
     /// Automatically delete all found files.
     #[structopt(long = "delete")]
     pub delete: bool,
+    /// Only list or delete files older than this value.
+    #[structopt(long = "days")]
+    pub days: Option<u32>,
 }

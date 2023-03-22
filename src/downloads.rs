@@ -8,7 +8,7 @@ use url::Url;
 
 pub fn find_downloads_in_folder(
     download_dir: &Path,
-    is_match: impl Fn(&Url) -> bool,
+    is_match: impl Fn(&Url, &Path) -> bool,
 ) -> Result<Vec<(PathBuf, Url)>, Error> {
     let mut matches = vec![];
 
@@ -21,7 +21,11 @@ pub fn find_downloads_in_folder(
                 .into_iter()
                 .filter_map(|x| Url::parse(&x).ok())
                 .collect::<Vec<_>>();
-            if let Some(source) = parsed_urls.into_iter().filter(|url| is_match(&url)).next() {
+            if let Some(source) = parsed_urls
+                .into_iter()
+                .filter(|url| is_match(&url, &entry.path()))
+                .next()
+            {
                 matches.push((entry.path().to_owned(), source));
             }
         }
