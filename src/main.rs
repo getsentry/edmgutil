@@ -163,6 +163,16 @@ fn cron_command(args: CronCommand) -> Result<(), Error> {
     Ok(())
 }
 
+fn matches_domain(pattern: &str, target: &str) -> bool {
+    if let Some(rest) = pattern.strip_prefix("*.") {
+        target == rest
+            || target.ends_with(rest)
+                && target.as_bytes().get(target.len() - rest.len() - 1) == Some(&b'.')
+    } else {
+        target == pattern
+    }
+}
+
 fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
     let dirs = directories::UserDirs::new();
     let download_dir = match args.path {
@@ -175,10 +185,14 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
 
     let domains = &args.domains;
     let matches = find_downloads_in_folder(download_dir, move |url| {
-        domains.is_empty() || domains.iter().any(|x| Some(x.as_str()) == url.domain())
+        domains.is_empty()
+            || domains.iter().any(|x| {
+                url.domain()
+                    .map_or(false, |domain| matches_domain(x.as_str(), domain))
+            })
     })?;
 
-    for (path, source) in matches {
+    for (path, source) in &matches {
         println!("{}", path.display());
         if args.verbose {
             println!("  source: {}", source);
@@ -189,6 +203,17 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
                 println!("  created: {}", created);
             }
         }
+    }
+
+    if args.delete {
+        for (path, _) in &matches {
+            fs::remove_file(path).ok();
+        }
+        println!(
+            "Deleted {} file{}",
+            matches.len(),
+            if matches.len() == 1 { "" } else { "s" }
+        );
     }
 
     Ok(())
@@ -245,4 +270,12 @@ fn main() -> Result<(), Error> {
         Commands::Cron(args) => cron_command(args),
         Commands::FindDownloads(args) => find_downloads_command(args),
     }
+}
+
+#[test]
+fn test_matches_domain() {
+    assert!(matches_domain("*.sentry.io", "sentry.io"));
+    assert!(matches_domain("*.sentry.io", "whatever.sentry.io"));
+    assert!(matches_domain("*.sentry.io", "whatever.else.sentry.io"));
+    assert!(!matches_domain("*.sentry.io", "whatever.else.sentry.com"));
 }

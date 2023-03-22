@@ -103,7 +103,10 @@ pub struct CronCommand {
 /// check that it does not contain files you don't expect it to be there.
 #[derive(Debug, StructOpt)]
 pub struct FindDownloadsCommand {
-    /// the domains to look out for
+    /// the domains to look out for.
+    ///
+    /// When *.domain.tld is used it looks for any subdomain of the domain
+    /// including the apex of the domain.
     #[structopt(long = "domain", short = "d")]
     pub domains: Vec<String>,
     /// provide additional information when listing files
@@ -111,4 +114,7 @@ pub struct FindDownloadsCommand {
     pub verbose: bool,
     /// an alternative folder than the default download folder to search
     pub path: Option<PathBuf>,
+    /// Automatically delete all found files.
+    #[structopt(long = "delete")]
+    pub delete: bool,
 }
