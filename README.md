@@ -90,9 +90,21 @@ This will list all files that were downloaded from `your-domain.tld`:
 edmgutil find-downloads -d your-domain.tld
 ```
 
-For additional information you can turn on verbose mode which shows the exact source of the
-file by URL:
+If subdomains should be included as well, use a `*`:
+
+```
+edmgutil find-downloads -d '*.your-domain.tld'
+```
+
+For additional information you can turn on verbose mode which shows the exact
+source of the file by URL:
 
 ```
 edmgutil find-downloads -d your-domain.tld -v
+```
+
+Additionally files from those domains older than N days can be auto deleted:
+
+```
+edmgutil find-downloads -d your-domain.tld --delete --days=7
 ```
