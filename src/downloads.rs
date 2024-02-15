@@ -23,8 +23,7 @@ pub fn find_downloads_in_folder(
                 .collect::<Vec<_>>();
             if let Some(source) = parsed_urls
                 .into_iter()
-                .filter(|url| is_match(&url, &entry.path()))
-                .next()
+                .find(|url| is_match(url, &entry.path()))
             {
                 matches.push((entry.path().to_owned(), source));
             }

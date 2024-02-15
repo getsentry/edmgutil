@@ -206,9 +206,9 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
         println!("{}", path.display());
         if args.verbose {
             println!("  source: {}", source);
-            let created = fs::metadata(&path)
+            let created = fs::metadata(path)
                 .and_then(|x| x.created())
-                .map(|x| DateTime::<Utc>::from(x));
+                .map(DateTime::<Utc>::from);
             if let Ok(created) = created {
                 println!("  created: {}", created);
             }
