@@ -39,7 +39,7 @@ pub fn make_dmg(path: &Path, volume_name: &str, size: usize, password: &str) -> 
         .arg("-encryption")
         .arg("AES-256")
         .arg("-stdinpass")
-        .arg(&path)
+        .arg(path)
         .stdin(Stdio::piped())
         .spawn()?;
     let mut stdin = child.stdin.take().unwrap();

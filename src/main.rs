@@ -42,7 +42,7 @@ fn prepare_dmg(
         Some(ref password) => password.clone(),
         None => {
             if !opts.keep_dmg && source_path.is_none() {
-                Uuid::new_v4().to_simple().to_string()
+                Uuid::new_v4().simple().to_string()
             } else {
                 Password::new().with_prompt("password").interact()?
             }

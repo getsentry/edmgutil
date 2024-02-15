@@ -12,7 +12,7 @@ pub fn find_downloads_in_folder(
 ) -> Result<Vec<(PathBuf, Url)>, Error> {
     let mut matches = vec![];
 
-    for entry in fs::read_dir(&download_dir)? {
+    for entry in fs::read_dir(download_dir)? {
         let entry = entry?;
         let attr = xattr::get(entry.path(), "com.apple.metadata:kMDItemWhereFroms");
         if let Ok(Some(encoded_plist)) = attr {
