@@ -42,7 +42,7 @@ fn prepare_dmg(
         Some(ref password) => password.clone(),
         None => {
             if !opts.keep_dmg && source_path.is_none() {
-                Uuid::new_v4().to_simple().to_string()
+                Uuid::new_v4().simple().to_string()
             } else {
                 Password::new().with_prompt("password").interact()?
             }
@@ -206,9 +206,9 @@ fn find_downloads_command(args: FindDownloadsCommand) -> Result<(), Error> {
         println!("{}", path.display());
         if args.verbose {
             println!("  source: {}", source);
-            let created = fs::metadata(&path)
+            let created = fs::metadata(path)
                 .and_then(|x| x.created())
-                .map(|x| DateTime::<Utc>::from(x));
+                .map(DateTime::<Utc>::from);
             if let Ok(created) = created {
                 println!("  created: {}", created);
             }
